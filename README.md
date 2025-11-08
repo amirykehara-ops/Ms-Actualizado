@@ -1,37 +1,70 @@
-# Pardos Chicken - Pedidos Serverless  
-**Microservicio 100% Serverless con EventBridge + Step Functions + DynamoDB**
+🐔 Pardos Chicken - Microservicio de Pedidos (Serverless)
+Arquitectura Event-Driven con AWS Step Functions, EventBridge y DynamoDB
+🧭 Visión General
 
-Flujo automático al crear un pedido:  
-**`COOKING → PACKAGING → DELIVERY → DELIVERED`**
+Este microservicio gestiona clientes y pedidos en un sistema 100% serverless, inspirado en la arquitectura de Taco Bell.
+Al crear un pedido:
 
----
+Se guarda en DynamoDB
 
-## Endpoints (HTTP API)
+Se publica un evento en EventBridge
 
-| Método | Ruta | Descripción |
-|--------|------|-----------|
-| `POST` | `/customers` | Crear cliente |
-| `GET`  | `/customers/{customerId}` | Ver cliente |
-| `POST` | `/orders` | Crear pedido → dispara Step Functions |
-| `GET`  | `/orders/{customerId}` | Listar pedidos del cliente |
-| `GET`  | `/order/{orderId}` | Ver pedido + cliente + progreso |
+Step Functions ejecuta el flujo completo:
+COOKING → PACKAGING → DELIVERY → DELIVERED
 
----
+🏗️ Arquitectura
+[API Gateway] 
+     │
+     ├── POST /orders → Lambda (create_order) → DynamoDB + EventBridge
+     │
+     └── EventBridge → Rule → Step Functions (OrderWorkflow)
+                         │
+                         ├── Lambda: process_cooking
+                         ├── Lambda: process_packaging
+                         ├── Lambda: process_delivery
+                         └── Lambda: process_delivered → DynamoDB
 
-## Arquitectura
+🔗 Endpoints (HTTP API)
+Método	Ruta	Descripción
+POST	/customers	Crear cliente
+GET	/customers/{customerId}	Ver cliente
+POST	/orders	Crear pedido (dispara flujo)
+GET	/orders/{customerId}	Ver pedidos del cliente
+GET	/order/{orderId}	Ver pedido + cliente + pasos
 
-```text
-POST /orders 
-  → DynamoDB (OrdersTable) 
-  → EventBridge (OrderCreated) 
-  → Step Functions (OrderWorkflow)
-     ├── process_cooking
-     ├── process_packaging
-     ├── process_delivery
-     └── process_delivered → DynamoDB (StepsTable)
+☁️ Componentes AWS
+Servicio	Nombre	Función
+DynamoDB	CustomersTable	Clientes
+DynamoDB	OrdersTable	Pedidos (PK, SK=INFO)
+DynamoDB	StepsTable	Historial de pasos
+EventBridge	PardosEventBus	Enrutamiento de eventos
+Step Functions	OrderWorkflow	Flujo del pedido
+IAM Role	LabRole	Permisos de ejecución
 
-Prueba Rápida (cURL)
-bash# 1. Crear cliente
+🔄 Flujo de un Pedido
+sequenceDiagram
+    participant API as API Gateway
+    participant Lambda as Lambda create_order
+    participant DB as OrdersTable
+    participant EB as EventBridge
+    participant SF as Step Functions
+    participant Cooking as process_cooking
+    participant Packaging as process_packaging
+    participant Delivery as process_delivery
+    participant Delivered as process_delivered
+
+    API->>Lambda: POST /orders
+    Lambda->>DB: Guardar pedido en OrdersTable
+    Lambda->>EB: Publicar evento OrderCreated
+    EB->>SF: Disparar flujo OrderWorkflow
+    SF->>Cooking: COOKING
+    SF->>Packaging: PACKAGING
+    SF->>Delivery: DELIVERY
+    SF->>Delivered: DELIVERED
+    Delivered->>DB: Actualizar status=COMPLETED
+
+⚙️ Pruebas Rápidas (cURL)
+# 1. Crear cliente
 curl -X POST https://2wmcf9zj7e.execute-api.us-east-1.amazonaws.com/customers \
   -H "Content-Type: application/json" \
   -d '{
@@ -52,14 +85,16 @@ curl -X POST https://2wmcf9zj7e.execute-api.us-east-1.amazonaws.com/orders \
     "total": 34.4
   }'
 
-# → Respuesta: {"message": "Order created", "orderId": "o1738795678"}
+# → Respuesta esperada:
+# {"orderId": "o1738795678"}
 
-# 3. Esperar 15 segundos (flujo automático)
+# 3. Esperar ~15 segundos (flujo automático)
 
 # 4. Ver pedido completo
 curl https://2wmcf9zj7e.execute-api.us-east-1.amazonaws.com/order/o1738795678
-Salida esperada:
-json{
+
+🧾 Respuesta esperada:
+{
   "orderId": "o1738795678",
   "status": "COMPLETED",
   "currentStep": "DELIVERED",
@@ -68,94 +103,57 @@ json{
   "steps": ["COOKING", "PACKAGING", "DELIVERY", "DELIVERED"]
 }
 
-Verificación
-Step Functions
-
-AWS Console → Step Functions
-Buscar: OrderWorkflow
-Ver ejecución → 4 pasos en verde
-
-DynamoDB (CLI)
-bash# OrdersTable
-aws dynamodb get-item \
-  --table-name OrdersTable \
-  --key '{"PK": {"S": "TENANT#pardos#ORDER#o1738795678"}, "SK": {"S": "INFO"}}' \
-  --region us-east-1
+🔍 Verificación Manual
+DynamoDB
+# OrdersTable
+aws dynamodb get-item --table-name OrdersTable \
+  --key '{"PK": {"S": "TENANT#pardos#ORDER#o1738795678"}, "SK": {"S": "INFO"}}'
 
 # StepsTable (4 pasos)
-aws dynamodb query \
-  --table-name StepsTable \
+aws dynamodb query --table-name StepsTable \
   --key-condition-expression "PK = :pk" \
-  --expression-attribute-values '{":pk": {"S": "TENANT#pardos#ORDER#o1738795678"}}' \
-  --region us-east-1
+  --expression-attribute-values '{":pk": {"S": "TENANT#pardos#ORDER#o1738795678"}}'
 
-Despliegue
-bashnpm install -g serverless
+Step Functions
+
+👉 Ir a: https://us-east-1.console.aws.amazon.com/states
+
+Buscar OrderWorkflow → Ver ejecución → Debe mostrar 4 pasos en verde
+
+🚀 Despliegue
+# Instalar Serverless
+npm install -g serverless
+
+# Desplegar con entorno de desarrollo
 sls deploy --stage dev
 
-Estructura del Proyecto
-text.
-├── handler.py       ← Lógica de todas las Lambdas
-├── serverless.yml   ← Infraestructura como código
-└── README.md        ← Este archivo
+🗂️ Estructura de Archivos
+.
+├── handler.py          ← Lógica de Lambdas
+├── serverless.yml      ← Infraestructura como código (IaC)
+└── README.md           ← Este documento
 
-Recursos AWS Creados
+🧠 Tecnologías Usadas
+Tecnología	Uso
+Python 3.13	Lenguaje principal
+AWS Lambda	Funciones sin servidor
+API Gateway (HTTP API)	Endpoints REST
+DynamoDB	Base de datos NoSQL
+EventBridge	Sistema de eventos
+Step Functions	Orquestación de procesos
+Serverless Framework	Despliegue automatizado
+⚠️ Notas Importantes
 
+status es palabra reservada → usar #st en UpdateExpression
 
+Decimal debe convertirse a float para eventos de EventBridge
 
+GET /order/{id} evita conflicto con /orders/{customerId}
 
+ScanIndexForward=True → ordena por SK (timestamp)
 
+✅ Estado Final
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-ServicioNombreFunciónDynamoDBCustomersTableClientesDynamoDBOrdersTablePedidosDynamoDBStepsTableHistorial de pasosEventBridgePardosEventBusEventosStep FunctionsOrderWorkflowOrquestaciónIAM RoleLabRolePermisos
-
-Notas Técnicas
-
-status → palabra reservada → usar #st en UpdateExpression
-Decimal → convertir a float solo para EventBridge
-GET /order/{id} → evita conflicto con /orders/{customerId}
-ScanIndexForward=True → ordena por SK
-
-
-Tecnologías
-
-Python 3.13
-AWS Lambda
-API Gateway (HTTP API)
-DynamoDB
-EventBridge
-Step Functions
-Serverless Framework
+💡 Listo para Producción
+Automático, escalable y totalmente serverless.
+Funciona como Taco Bell, pero con sabor a Pardos Chicken 🍗🔥
