@@ -1,4 +1,3 @@
-entonces dame el codigo actualizado:
 import os
 import json
 import boto3
