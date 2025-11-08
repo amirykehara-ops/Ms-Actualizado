@@ -112,6 +112,32 @@ def get_customer(event, context):
     except Exception as e:
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
 
+# (ENDPOINT ADICIONAL)
+
+# GET /orders/{order_id}
+def get_order(event, context):
+    try:
+        order_id = event['pathParameters']['orderId']
+        pk = f"TENANT#pardos#ORDER#{order_id}"
+        order = orders_table.get_item(Key={"PK": pk, "SK": "INFO"}).get('Item')
+        if not order:
+            return {"statusCode": 404, "body": json.dumps({"error": "Not found"})}
+        
+        customer = customers_table.get_item(Key={"PK": f"TENANT#pardos#CUSTOMER#{order['customerId']}"}).get('Item', {})
+        steps = steps_table.query(KeyConditionExpression=Key('PK').eq(pk),ScanIndexForward=True).get('Items', [])
+        
+        result = {
+            "orderId": order_id,
+            "status": order["status"],
+            "currentStep": order["currentStep"],
+            "total": float(order["total"]),
+            "customer": {"name": customer.get("name", "N/A")},
+            "steps": [s["stepName"] for s in steps]
+        }
+        return {"statusCode": 200, "body": json.dumps(result)}
+    except Exception as e:
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+
 # ========================
 # Auxiliar: Actualizar paso
 # ========================
@@ -216,3 +242,4 @@ def process_delivered(event, context):
     except Exception as e:
         print("ERROR in process_delivered:", str(e))
         raise
+
