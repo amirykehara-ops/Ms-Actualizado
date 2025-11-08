@@ -1,4 +1,4 @@
-org: amirykehara  #-> Your Serverless Framework Org
+org amirykehara
 service: cliente-ms
 
 provider:
@@ -8,12 +8,12 @@ provider:
   memorySize: 256
   timeout: 15
   iam:
-    role: arn:aws:iam::773506457076:role/LabRole  #-> Your IAM Role ARN (agrega permisos para EventBridge y StepFunctions si no los tiene)
+    role: arn:aws:iam::773506457076:role/LabRole
   environment:
     CUSTOMERS_TABLE: CustomersTable
     ORDERS_TABLE: OrdersTable
-    STEPS_TABLE: StepsTable  # Nueva
-    EVENT_BUS_NAME: PardosEventBus  # Nuevo
+    STEPS_TABLE: StepsTable
+    EVENT_BUS_NAME: PardosEventBus
 
 functions:
   createOrder:
@@ -22,25 +22,29 @@ functions:
       - httpApi:
           path: /orders
           method: post
+
   getOrdersByCustomer:
     handler: handler.get_orders_by_customer
     events:
       - httpApi:
           path: /orders/{customerId}
           method: get
+
   createCustomer:
     handler: handler.create_customer
     events:
       - httpApi:
           path: /customers
           method: post
+
   getCustomer:
     handler: handler.get_customer
     events:
       - httpApi:
           path: /customers/{customerId}
           method: get
-  # Nuevas funciones para Step Functions
+
+  # Lambdas del Workflow (Step Functions)
   processCooking:
     handler: handler.process_cooking
   processPackaging:
@@ -52,7 +56,7 @@ functions:
 
 resources:
   Resources:
-    # Tablas existentes
+    # === TABLAS DYNAMODB ===
     CustomersTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -81,7 +85,6 @@ resources:
             KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
-    # Nueva tabla para steps
     StepsTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -98,34 +101,36 @@ resources:
             KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
-    # Nuevo: EventBus (EventBridge)
+    # === EVENTBRIDGE: EventBus ===
     PardosEventBus:
       Type: AWS::Events::EventBus
       Properties:
         Name: PardosEventBus
 
-    # Nuevo: Rule para trigger Step Functions desde OrderCreated
+    # === EVENTBRIDGE: Rule para OrderCreated → Step Functions ===
     OrderCreatedRule:
       Type: AWS::Events::Rule
       Properties:
         EventBusName: !Ref PardosEventBus
         EventPattern:
-          source: ["pardos.orders"]
-          detail-type: ["OrderCreated"]
+          source:
+            - "pardos.orders"
+          detail-type:
+            - "OrderCreated"
         State: ENABLED
         Targets:
-          - Arn: !Ref OrderWorkflowStateMachine  # Apunta al State Machine
-            RoleArn: !GetAtt StepFunctionsExecutionRole.Arn  # Rol para ejecutar
+          - Arn: !Ref OrderWorkflowStateMachine
+            Id: StepFunctionsTarget
+            RoleArn: arn:aws:iam::773506457076:role/LabRole  # Usa LabRole
 
-    # Nuevo: State Machine para Step Functions
-    # Nuevo: State Machine para Step Functions
+    # === STEP FUNCTIONS: State Machine ===
     OrderWorkflowStateMachine:
       Type: AWS::StepFunctions::StateMachine
       Properties:
         StateMachineName: OrderWorkflow
         DefinitionString: !Sub |
           {
-            "Comment": "Workflow para procesar pedidos: CREATED -> COOKING -> PACKAGING -> DELIVERY -> DELIVERED",
+            "Comment": "Flujo de pedido: CREATED → COOKING → PACKAGING → DELIVERY → DELIVERED",
             "StartAt": "Cooking",
             "States": {
               "Cooking": {
@@ -150,27 +155,10 @@ resources:
               }
             }
           }
-        RoleArn: !GetAtt StepFunctionsExecutionRole.Arn
-    # Rol para Step Functions (permisos para invocar Lambdas y acceder DynamoDB/EventBridge)
-    StepFunctionsExecutionRole:
-      Type: AWS::IAM::Role
-      Properties:
-        AssumeRolePolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Principal:
-                Service: states.amazonaws.com
-              Action: sts:AssumeRole
-        Path: "/"
-        ManagedPolicyArns:
-          - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
-          - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess  # Para acceso a tablas
-          - arn:aws:iam::aws:policy/AmazonEventBridgeFullAccess  # Para put_events
+        RoleArn: arn:aws:iam::773506457076:role/LabRole  # Usa LabRole
 
-#plugins:
-  #- serverless-python-requirements  # Si necesitas paquetes extras, agrégalo
-custom:
-  pythonRequirements:
-    dockerizePip: true
-    usePoetry: false
+# === OPCIONAL: Solo si usas paquetes externos ===
+# custom:
+#   pythonRequirements:
+#     dockerizePip: true
+#     usePoetry: false
