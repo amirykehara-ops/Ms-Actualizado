@@ -62,20 +62,6 @@ functions:
           path: /customers/{customerId}
           method: get
 
-  # ---------- Orchestrator Lambdas (Step Function tasks) ----------
-  taskCooking:
-    handler: orchestrator_handlers.task_cooking
-    memorySize: 256
-    timeout: 30
-  taskPackaging:
-    handler: orchestrator_handlers.task_packaging
-    memorySize: 256
-    timeout: 30
-  taskDelivery:
-    handler: orchestrator_handlers.task_delivery
-    memorySize: 256
-    timeout: 30
-
 resources:
   Resources:
 
@@ -85,7 +71,7 @@ resources:
       Properties:
         Name: pf-pardos-bus
 
-    # DynamoDB: CustomersTable
+    # DynamoDB Tables
     CustomersTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -98,7 +84,6 @@ resources:
             KeyType: HASH
         BillingMode: PAY_PER_REQUEST
 
-    # DynamoDB: OrdersTable
     OrdersTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -115,7 +100,6 @@ resources:
             KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
-    # DynamoDB: StepsTable
     StepsTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -132,7 +116,7 @@ resources:
             KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
-    # Role para EventBridge poder iniciar Step Function
+    # Roles
     EventBridgeStepRole:
       Type: AWS::IAM::Role
       Properties:
@@ -156,7 +140,6 @@ resources:
                     - states:StartExecution
                   Resource: "*"
 
-    # Rol que usa Step Functions para ejecutar las Lambdas
     StepFunctionExecutionRole:
       Type: AWS::IAM::Role
       Properties:
@@ -195,13 +178,40 @@ resources:
                     - events:PutEvents
                   Resource: "*"
 
-    # State Machine (Step Functions)
+    # Step Function Lambdas como recursos explícitos
+    TaskCookingLambda:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: taskCooking
+        Handler: orchestrator_handlers.task_cooking
+        Runtime: python3.13
+        MemorySize: 256
+        Timeout: 30
+        Role: !GetAtt StepFunctionExecutionRole.Arn
+
+    TaskPackagingLambda:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: taskPackaging
+        Handler: orchestrator_handlers.task_packaging
+        Runtime: python3.13
+        MemorySize: 256
+        Timeout: 30
+        Role: !GetAtt StepFunctionExecutionRole.Arn
+
+    TaskDeliveryLambda:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: taskDelivery
+        Handler: orchestrator_handlers.task_delivery
+        Runtime: python3.13
+        MemorySize: 256
+        Timeout: 30
+        Role: !GetAtt StepFunctionExecutionRole.Arn
+
+    # State Machine
     PardosOrderStateMachine:
       Type: AWS::StepFunctions::StateMachine
-      DependsOn:
-        - taskCooking
-        - taskPackaging
-        - taskDelivery
       Properties:
         StateMachineName: PardosOrderStateMachine
         RoleArn: !GetAtt StepFunctionExecutionRole.Arn
@@ -235,11 +245,11 @@ resources:
               }
             }
         DefinitionSubstitutions:
-          TaskCookingArn: !GetAtt taskCooking.Arn
-          TaskPackagingArn: !GetAtt taskPackaging.Arn
-          TaskDeliveryArn: !GetAtt taskDelivery.Arn
+          TaskCookingArn: !GetAtt TaskCookingLambda.Arn
+          TaskPackagingArn: !GetAtt TaskPackagingLambda.Arn
+          TaskDeliveryArn: !GetAtt TaskDeliveryLambda.Arn
 
-    # EventBridge Rule: cuando haya un OrderCreated -> start Step Function
+    # EventBridge Rule
     OrderCreatedRule:
       Type: AWS::Events::Rule
       Properties:
