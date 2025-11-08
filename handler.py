@@ -128,136 +128,113 @@ def create_customer(event, context):
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
 # Nuevas Lambdas para Step Functions (una por paso, simple: actualiza estado y registra step)
 # Procesar COOKING
+# ========================
+# Función auxiliar: Iniciar un paso
+# ========================
+def _start_step(order_id, step_name):
+    pk = f"TENANT#pardos#ORDER#{order_id}"
+    now = datetime.utcnow().isoformat()
+    
+    # Actualizar OrdersTable
+    orders_table.update_item(
+        Key={"PK": pk, "SK": "INFO"},
+        UpdateExpression="SET currentStep = :step, #st = :status",
+        ExpressionAttributeNames={"#st": "status"},
+        ExpressionAttributeValues={":step": step_name, ":status": "IN_PROGRESS"}
+    )
+    
+    # Registrar en StepsTable
+    steps_table.put_item(Item={
+        "PK": pk,
+        "SK": f"STEP#{step_name}#{now}",
+        "stepName": step_name,
+        "status": "IN_PROGRESS",
+        "startedAt": now
+    })
+    
+    # Publicar evento
+    eventbridge.put_events(Entries=[{
+        'Source': 'pardos.orders',
+        'DetailType': 'OrderStageStarted',
+        'Detail': json.dumps({"orderId": order_id, "step": step_name}),
+        'EventBusName': EVENT_BUS_NAME
+    }])
+
+
+# ========================
+# COOKING
+# ========================
 def process_cooking(event, context):
     try:
-        order_id = event['orderId']
-        pk_order = f"TENANT#pardos#ORDER#{order_id}"
-        now = datetime.utcnow().isoformat()
-        # Actualizar OrdersTable
-        orders_table.update_item(
-            Key={"PK": pk_order, "SK": "INFO"},
-            UpdateExpression="SET currentStep = :step, status = :status",
-            ExpressionAttributeValues={":step": "COOKING", ":status": "IN_PROGRESS"}
-        )
-        # Registrar en StepsTable
-        pk_step = pk_order
-        sk_step = f"STEP#COOKING#{now}"
-        steps_table.put_item(Item={
-            "PK": pk_step,
-            "SK": sk_step,
-            "stepName": "COOKING",
-            "status": "IN_PROGRESS",
-            "startedAt": now
-        })
-        # Publicar evento completado (opcional, para notificaciones futuras)
-        eventbridge.put_events(
-            Entries=[{
-                'Source': 'pardos.orders',
-                'DetailType': 'OrderStageStarted',
-                'Detail': json.dumps({"orderId": order_id, "step": "COOKING"}),
-                'EventBusName': EVENT_BUS_NAME
-            }]
-        )
-        return {"orderId": order_id, "step": "COOKING"} # Paso a siguiente en Step Functions
+        order_id = event['detail']['orderId']  # ← CORREGIDO
+        _start_step(order_id, "COOKING")
+        return {"orderId": order_id}
     except Exception as e:
-        print("ERROR:", str(e))
-        raise e # Fallar el task si error
-# Procesar PACKAGING (similar)
+        print("ERROR in process_cooking:", str(e))
+        raise
+
+
+# ========================
+# PACKAGING
+# ========================
 def process_packaging(event, context):
     try:
-        order_id = event['orderId']
-        pk_order = f"TENANT#pardos#ORDER#{order_id}"
-        now = datetime.utcnow().isoformat()
-        # Actualizar OrdersTable
-        orders_table.update_item(
-            Key={"PK": pk_order, "SK": "INFO"},
-            UpdateExpression="SET currentStep = :step, status = :status",
-            ExpressionAttributeValues={":step": "PACKAGING", ":status": "IN_PROGRESS"}
-        )
-        # Registrar en StepsTable
-        pk_step = pk_order
-        sk_step = f"STEP#PACKAGING#{now}"
-        steps_table.put_item(Item={
-            "PK": pk_step,
-            "SK": sk_step,
-            "stepName": "PACKAGING",
-            "status": "IN_PROGRESS",
-            "startedAt": now
-        })
-        eventbridge.put_events(
-            Entries=[{
-                'Source': 'pardos.orders',
-                'DetailType': 'OrderStageStarted',
-                'Detail': json.dumps({"orderId": order_id, "step": "PACKAGING"}),
-                'EventBusName': EVENT_BUS_NAME
-            }]
-        )
-        return {"orderId": order_id, "step": "PACKAGING"}
+        order_id = event['detail']['orderId']  # ← CORREGIDO
+        _start_step(order_id, "PACKAGING")
+        return {"orderId": order_id}
     except Exception as e:
-        print("ERROR:", str(e))
-        raise e
-# Procesar DELIVERY
+        print("ERROR in process_packaging:", str(e))
+        raise
+
+
+# ========================
+# DELIVERY
+# ========================
 def process_delivery(event, context):
     try:
-        order_id = event['orderId']
-        pk_order = f"TENANT#pardos#ORDER#{order_id}"
-        now = datetime.utcnow().isoformat()
-        orders_table.update_item(
-            Key={"PK": pk_order, "SK": "INFO"},
-            UpdateExpression="SET currentStep = :step, status = :status",
-            ExpressionAttributeValues={":step": "DELIVERY", ":status": "IN_PROGRESS"}
-        )
-        pk_step = pk_order
-        sk_step = f"STEP#DELIVERY#{now}"
-        steps_table.put_item(Item={
-            "PK": pk_step,
-            "SK": sk_step,
-            "stepName": "DELIVERY",
-            "status": "IN_PROGRESS",
-            "startedAt": now
-        })
-        eventbridge.put_events(
-            Entries=[{
-                'Source': 'pardos.orders',
-                'DetailType': 'OrderStageStarted',
-                'Detail': json.dumps({"orderId": order_id, "step": "DELIVERY"}),
-                'EventBusName': EVENT_BUS_NAME
-            }]
-        )
-        return {"orderId": order_id, "step": "DELIVERY"}
+        order_id = event['detail']['orderId']  # ← CORREGIDO
+        _start_step(order_id, "DELIVERY")
+        return {"orderId": order_id}
     except Exception as e:
-        print("ERROR:", str(e))
-        raise e
-# Procesar DELIVERED (final)
+        print("ERROR in process_delivery:", str(e))
+        raise
+
+
+# ========================
+# DELIVERED (FINAL)
+# ========================
 def process_delivered(event, context):
     try:
-        order_id = event['orderId']
-        pk_order = f"TENANT#pardos#ORDER#{order_id}"
+        order_id = event['detail']['orderId']  # ← CORREGIDO
+        pk = f"TENANT#pardos#ORDER#{order_id}"
         now = datetime.utcnow().isoformat()
+        
+        # Finalizar orden
         orders_table.update_item(
-            Key={"PK": pk_order, "SK": "INFO"},
+            Key={"PK": pk, "SK": "INFO"},
             UpdateExpression="SET currentStep = :step, status = :status",
             ExpressionAttributeValues={":step": "DELIVERED", ":status": "COMPLETED"}
         )
-        pk_step = pk_order
-        sk_step = f"STEP#DELIVERED#{now}"
+        
+        # Registrar paso final
         steps_table.put_item(Item={
-            "PK": pk_step,
-            "SK": sk_step,
+            "PK": pk,
+            "SK": f"STEP#DELIVERED#{now}",
             "stepName": "DELIVERED",
             "status": "DONE",
             "startedAt": now,
             "finishedAt": now
         })
-        eventbridge.put_events(
-            Entries=[{
-                'Source': 'pardos.orders',
-                'DetailType': 'OrderDelivered',
-                'Detail': json.dumps({"orderId": order_id}),
-                'EventBusName': EVENT_BUS_NAME
-            }]
-        )
-        return {"orderId": order_id, "step": "DELIVERED"}
+        
+        # Evento final
+        eventbridge.put_events(Entries=[{
+            'Source': 'pardos.orders',
+            'DetailType': 'OrderDelivered',
+            'Detail': json.dumps({"orderId": order_id}),
+            'EventBusName': EVENT_BUS_NAME
+        }])
+        
+        return {"orderId": order_id}
     except Exception as e:
-        print("ERROR:", str(e))
-        raise e
+        print("ERROR in process_delivered:", str(e))
+        raise
