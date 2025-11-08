@@ -43,6 +43,12 @@ functions:
       - httpApi:
           path: /customers/{customerId}
           method: get
+  getOrder:
+    handler: handler.get_order
+    events:
+      - httpApi:
+          path: /order/{orderId}
+          method: get
 
   # Lambdas del Workflow (Step Functions)
   processCooking:
