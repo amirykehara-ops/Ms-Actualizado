@@ -16,44 +16,65 @@ EVENT_BUS_NAME = os.environ.get('EVENT_BUS_NAME', 'PardosEventBus')
 # ========================
 # 🧾 Crear un nuevo pedido
 # ========================
+from decimal import Decimal
+import json
+
 def create_order(event, context):
     try:
+        # Parsear body con Decimal
         body = json.loads(event.get('body', '{}'), parse_float=Decimal)
+
+        # Validaciones básicas
+        customer_id = body.get("customerId")
+        items_raw = body.get("items", [])
+        total_decimal = body.get("total")
+
+        if not customer_id or not items_raw or total_decimal is None:
+            return {"statusCode": 400, "body": json.dumps({"error": "Missing required fields"})}
+
         order_id = f"o{int(datetime.utcnow().timestamp())}"
         pk = f"TENANT#pardos#ORDER#{order_id}"
 
-        # Convertir TODOS los Decimal a float ANTES de guardar/event
-        items = [
+        # === GUARDAR EN DYNAMODB: Usar Decimal ===
+        items_for_dynamo = [
             {
                 "productId": item["productId"],
-                "qty": item["qty"],
-                "price": float(item["price"])  # ← Conversión aquí
+                "qty": int(item["qty"]),
+                "price": Decimal(str(item["price"]))  # ← Decimal para DynamoDB
             }
-            for item in body["items"]
+            for item in items_raw
         ]
-        total = float(body["total"])  # ← Conversión aquí
 
         item = {
             "PK": pk,
             "SK": "INFO",
-            "customerId": body["customerId"],
+            "customerId": customer_id,
             "status": "CREATED",
-            "items": items,  # ← Ya convertidos
-            "total": total,
+            "items": items_for_dynamo,
+            "total": Decimal(str(total_decimal)),  # ← Decimal para DynamoDB
             "currentStep": "CREATED",
             "createdAt": datetime.utcnow().isoformat()
         }
         orders_table.put_item(Item=item)
 
-        # Publicar evento (todo float)
+        # === EVENTBRIDGE: Usar float para JSON ===
+        items_for_event = [
+            {
+                "productId": item["productId"],
+                "qty": item["qty"],
+                "price": float(item["price"])  # ← float para JSON
+            }
+            for item in items_raw
+        ]
+
         eventbridge.put_events(Entries=[{
             'Source': 'pardos.orders',
             'DetailType': 'OrderCreated',
             'Detail': json.dumps({
                 "orderId": order_id,
-                "customerId": body["customerId"],
-                "total": total,
-                "items": items
+                "customerId": customer_id,
+                "total": float(total_decimal),  # ← float
+                "items": items_for_event
             }),
             'EventBusName': EVENT_BUS_NAME
         }])
@@ -62,26 +83,7 @@ def create_order(event, context):
             "statusCode": 201,
             "body": json.dumps({"message": "Order created", "orderId": order_id})
         }
-    except Exception as e:
-        print("ERROR:", str(e))
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
-# =====================================
-# 🔍 Obtener pedidos por ID de cliente
-# =====================================
-def get_orders_by_customer(event, context):
-    try:
-        customer_id = event['pathParameters']['customerId']
-        # Buscar todos los pedidos que correspondan al customerId
-        response = orders_table.scan(
-            FilterExpression=Key('customerId').eq(customer_id)
-        )
-        orders = response.get('Items', [])
-        if not orders:
-            return {"statusCode": 404, "body": json.dumps({"message": "No orders found for this customer"})}
-        return {
-            "statusCode": 200,
-            "body": json.dumps({"orders": orders}, default=str)
-        }
+
     except Exception as e:
         print("ERROR:", str(e))
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
