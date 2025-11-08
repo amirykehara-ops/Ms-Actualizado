@@ -118,11 +118,15 @@ def get_customer(event, context):
 def _update_step(order_id, step, status="IN_PROGRESS"):
     pk = f"TENANT#pardos#ORDER#{order_id}"
     now = datetime.utcnow().isoformat()
+    
+    # USAR #st para "status" (reservada)
     orders_table.update_item(
         Key={"PK": pk, "SK": "INFO"},
-        UpdateExpression="SET currentStep = :step, status = :status",
+        UpdateExpression="SET currentStep = :step, #st = :status",
+        ExpressionAttributeNames={"#st": "status"},  # ← Renombrar
         ExpressionAttributeValues={":step": step, ":status": status}
     )
+    
     steps_table.put_item(Item={
         "PK": pk,
         "SK": f"STEP#{step}#{now}",
@@ -130,6 +134,7 @@ def _update_step(order_id, step, status="IN_PROGRESS"):
         "status": status,
         "startedAt": now
     })
+    
     eventbridge.put_events(Entries=[{
         'Source': 'pardos.orders',
         'DetailType': 'OrderStageStarted' if status == "IN_PROGRESS" else 'OrderStageCompleted',
@@ -182,11 +187,15 @@ def process_delivered(event, context):
         order_id = event['orderId']
         pk = f"TENANT#pardos#ORDER#{order_id}"
         now = datetime.utcnow().isoformat()
+        
+        # USAR #st para "status"
         orders_table.update_item(
             Key={"PK": pk, "SK": "INFO"},
-            UpdateExpression="SET currentStep = :step, status = :status",
+            UpdateExpression="SET currentStep = :step, #st = :status",
+            ExpressionAttributeNames={"#st": "status"},
             ExpressionAttributeValues={":step": "DELIVERED", ":status": "COMPLETED"}
         )
+        
         steps_table.put_item(Item={
             "PK": pk,
             "SK": f"STEP#DELIVERED#{now}",
@@ -195,12 +204,14 @@ def process_delivered(event, context):
             "startedAt": now,
             "finishedAt": now
         })
+        
         eventbridge.put_events(Entries=[{
             'Source': 'pardos.orders',
             'DetailType': 'OrderDelivered',
             'Detail': json.dumps({"orderId": order_id}),
             'EventBusName': EVENT_BUS_NAME
         }])
+        
         return {"orderId": order_id}
     except Exception as e:
         print("ERROR in process_delivered:", str(e))
