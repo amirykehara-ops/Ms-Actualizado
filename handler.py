@@ -27,19 +27,29 @@ def create_order(event, context):
         order_id = f"o{int(datetime.utcnow().timestamp())}"
         pk = f"TENANT#pardos#ORDER#{order_id}"
 
+        # === GUARDAR EN DYNAMODB (Decimal OK) ===
         item = {
             "PK": pk,
             "SK": "INFO",
             "customerId": body["customerId"],
             "status": "CREATED",
-            "items": body["items"],
-            "total": body["total"],
+            "items": body["items"],  # ← Decimal OK
+            "total": body["total"],  # ← Decimal OK
             "currentStep": "CREATED",
             "createdAt": datetime.utcnow().isoformat()
         }
         orders_table.put_item(Item=item)
 
-        # Publicar evento
+        # === EVENTBRIDGE: Convertir a float ===
+        items_for_event = [
+            {
+                "productId": item["productId"],
+                "qty": item["qty"],
+                "price": float(item["price"])
+            }
+            for item in body["items"]
+        ]
+
         eventbridge.put_events(Entries=[{
             'Source': 'pardos.orders',
             'DetailType': 'OrderCreated',
@@ -47,7 +57,7 @@ def create_order(event, context):
                 "orderId": order_id,
                 "customerId": body["customerId"],
                 "total": float(body["total"]),
-                "items": body["items"]
+                "items": items_for_event
             }),
             'EventBusName': EVENT_BUS_NAME
         }])
