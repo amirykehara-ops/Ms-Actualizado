@@ -168,5 +168,9 @@ resources:
           - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess  # Para acceso a tablas
           - arn:aws:iam::aws:policy/AmazonEventBridgeFullAccess  # Para put_events
 
-plugins:
-  - serverless-python-requirements  # Si necesitas paquetes extras, agrégalo
+#plugins:
+  #- serverless-python-requirements  # Si necesitas paquetes extras, agrégalo
+custom:
+  pythonRequirements:
+    dockerizePip: true
+    usePoetry: false
