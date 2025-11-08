@@ -1,71 +1,74 @@
-🐔 Pardos Chicken - Microservicio de Pedidos (Serverless)
-Arquitectura Event-Driven con AWS Step Functions, EventBridge y DynamoDB
-🧭 Visión General
+# Pardos Chicken - Microservicio de Pedidos (Serverless)
+# Arquitectura Event-Driven con AWS Step Functions, EventBridge y DynamoDB
 
-Este microservicio gestiona clientes y pedidos en un sistema 100% serverless, inspirado en la arquitectura de Taco Bell.
+## 🧩 Visión General
+Este microservicio gestiona clientes y pedidos en un sistema **100% serverless**, inspirado en Taco Bell.  
 Al crear un pedido:
+- Se guarda en **DynamoDB**
+- Se publica un evento en **EventBridge**
+- **Step Functions** ejecuta el flujo:  
+  `COOKING → PACKAGING → DELIVERY → DELIVERED`
 
-Se guarda en DynamoDB
+---
 
-Se publica un evento en EventBridge
-
-Step Functions ejecuta el flujo completo:
-COOKING → PACKAGING → DELIVERY → DELIVERED
-
-🏗️ Arquitectura
+## 🏗️ Arquitectura
 [API Gateway] 
-     │
-     ├── POST /orders → Lambda (create_order) → DynamoDB + EventBridge
-     │
-     └── EventBridge → Rule → Step Functions (OrderWorkflow)
-                         │
-                         ├── Lambda: process_cooking
-                         ├── Lambda: process_packaging
-                         ├── Lambda: process_delivery
-                         └── Lambda: process_delivered → DynamoDB
+│
+├── POST /orders → Lambda (create_order) → DynamoDB + EventBridge  
+│
+└── EventBridge → Rule → Step Functions (OrderWorkflow)
+   │  
+   ├── Lambda: process_cooking  
+   ├── Lambda: process_packaging  
+   ├── Lambda: process_delivery  
+   └── Lambda: process_delivered → DynamoDB  
 
-🔗 Endpoints (HTTP API)
-Método	Ruta	Descripción
-POST	/customers	Crear cliente
-GET	/customers/{customerId}	Ver cliente
-POST	/orders	Crear pedido (dispara flujo)
-GET	/orders/{customerId}	Ver pedidos del cliente
-GET	/order/{orderId}	Ver pedido + cliente + pasos
+---
 
-☁️ Componentes AWS
-Servicio	Nombre	Función
-DynamoDB	CustomersTable	Clientes
-DynamoDB	OrdersTable	Pedidos (PK, SK=INFO)
-DynamoDB	StepsTable	Historial de pasos
-EventBridge	PardosEventBus	Enrutamiento de eventos
-Step Functions	OrderWorkflow	Flujo del pedido
-IAM Role	LabRole	Permisos de ejecución
+## 🌐 Endpoints (HTTP API)
 
-🔄 Flujo de un Pedido
-sequenceDiagram
-    participant API as API Gateway
-    participant Lambda as Lambda create_order
-    participant DB as OrdersTable
-    participant EB as EventBridge
-    participant SF as Step Functions
-    participant Cooking as process_cooking
-    participant Packaging as process_packaging
-    participant Delivery as process_delivery
-    participant Delivered as process_delivered
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| POST   | /customers | Crear cliente |
+| GET    | /customers/{customerId} | Ver cliente |
+| POST   | /orders | Crear pedido (dispara flujo) |
+| GET    | /orders/{customerId} | Ver pedidos del cliente |
+| GET    | /order/{orderId} | Ver pedido + cliente + pasos |
 
-    API->>Lambda: POST /orders
-    Lambda->>DB: Guardar pedido en OrdersTable
-    Lambda->>EB: Publicar evento OrderCreated
-    EB->>SF: Disparar flujo OrderWorkflow
-    SF->>Cooking: COOKING
-    SF->>Packaging: PACKAGING
-    SF->>Delivery: DELIVERY
-    SF->>Delivered: DELIVERED
-    Delivered->>DB: Actualizar status=COMPLETED
+---
 
-⚙️ Pruebas Rápidas (cURL)
-# 1. Crear cliente
-curl -X POST https://2wmcf9zj7e.execute-api.us-east-1.amazonaws.com/customers \
+## ☁️ Componentes AWS
+
+| Servicio | Nombre | Función |
+|----------|--------|---------|
+| DynamoDB | CustomersTable | Clientes |
+| DynamoDB | OrdersTable | Pedidos (PK, SK=INFO) |
+| DynamoDB | StepsTable | Historial de pasos |
+| EventBridge | PardosEventBus | Eventos |
+| Step Functions | OrderWorkflow | Flujo de cocina |
+| IAM Role | LabRole | Permisos |
+
+---
+
+## 🔄 Flujo de un Pedido
+
+API Gateway  
+→ Lambda create_order  
+→ DynamoDB  
+→ EventBridge  
+→ Step Functions  
+  → process_cooking  
+  → process_packaging  
+  → process_delivery  
+  → process_delivered  
+  → DynamoDB (status=COMPLETED)
+
+---
+
+## 🚀 Pruebas Rápidas (cURL)
+
+# 1️⃣ Crear cliente
+curl -X POST https://<api-gateway-url>/customers \
   -H "Content-Type: application/json" \
   -d '{
     "customerId": "c100",
@@ -73,8 +76,8 @@ curl -X POST https://2wmcf9zj7e.execute-api.us-east-1.amazonaws.com/customers \
     "email": "ana@utec.edu.pe"
   }'
 
-# 2. Crear pedido
-curl -X POST https://2wmcf9zj7e.execute-api.us-east-1.amazonaws.com/orders \
+# 2️⃣ Crear pedido
+curl -X POST https://<api-gateway-url>/orders \
   -H "Content-Type: application/json" \
   -d '{
     "customerId": "c100",
@@ -85,26 +88,27 @@ curl -X POST https://2wmcf9zj7e.execute-api.us-east-1.amazonaws.com/orders \
     "total": 34.4
   }'
 
-# → Respuesta esperada:
-# {"orderId": "o1738795678"}
+# → Respuesta: {"orderId": "o1738795678"}
 
-# 3. Esperar ~15 segundos (flujo automático)
+# 3️⃣ Esperar 15 segundos (flujo automático)
 
-# 4. Ver pedido completo
-curl https://2wmcf9zj7e.execute-api.us-east-1.amazonaws.com/order/o1738795678
+# 4️⃣ Ver pedido completo
+curl https://<api-gateway-url>/order/o1738795678
 
-🧾 Respuesta esperada:
-{
-  "orderId": "o1738795678",
-  "status": "COMPLETED",
-  "currentStep": "DELIVERED",
-  "total": 34.4,
-  "customer": {"name": "Ana López"},
-  "steps": ["COOKING", "PACKAGING", "DELIVERY", "DELIVERED"]
-}
+# ✅ Respuesta esperada:
+# {
+#   "orderId": "o1738795678",
+#   "status": "COMPLETED",
+#   "currentStep": "DELIVERED",
+#   "total": 34.4,
+#   "customer": {"name": "Ana López"},
+#   "steps": ["COOKING", "PACKAGING", "DELIVERY", "DELIVERED"]
+# }
 
-🔍 Verificación Manual
-DynamoDB
+---
+
+## 🔍 Verificación Manual
+
 # OrdersTable
 aws dynamodb get-item --table-name OrdersTable \
   --key '{"PK": {"S": "TENANT#pardos#ORDER#o1738795678"}, "SK": {"S": "INFO"}}'
@@ -114,46 +118,56 @@ aws dynamodb query --table-name StepsTable \
   --key-condition-expression "PK = :pk" \
   --expression-attribute-values '{":pk": {"S": "TENANT#pardos#ORDER#o1738795678"}}'
 
-Step Functions
+# Step Functions
+# Ver en consola AWS Step Functions → OrderWorkflow → ejecución con 4 pasos en verde
 
-👉 Ir a: https://us-east-1.console.aws.amazon.com/states
+---
 
-Buscar OrderWorkflow → Ver ejecución → Debe mostrar 4 pasos en verde
+## ⚙️ Despliegue
 
-🚀 Despliegue
-# Instalar Serverless
 npm install -g serverless
-
-# Desplegar con entorno de desarrollo
 sls deploy --stage dev
 
-🗂️ Estructura de Archivos
+---
+
+## 📁 Estructura de Archivos
+
 .
-├── handler.py          ← Lógica de Lambdas
-├── serverless.yml      ← Infraestructura como código (IaC)
-└── README.md           ← Este documento
+├── handler.py          ← Lógica de Lambdas  
+├── serverless.yml      ← Infraestructura como código  
+└── README.md           ← Este archivo  
 
-🧠 Tecnologías Usadas
-Tecnología	Uso
-Python 3.13	Lenguaje principal
-AWS Lambda	Funciones sin servidor
-API Gateway (HTTP API)	Endpoints REST
-DynamoDB	Base de datos NoSQL
-EventBridge	Sistema de eventos
-Step Functions	Orquestación de procesos
-Serverless Framework	Despliegue automatizado
-⚠️ Notas Importantes
+---
 
-status es palabra reservada → usar #st en UpdateExpression
+## 🧠 Tecnologías Usadas
 
-Decimal debe convertirse a float para eventos de EventBridge
+| Tecnología | Uso |
+|------------|-----|
+| Python 3.13 | Lambdas |
+| AWS Lambda | Funciones |
+| API Gateway (HTTP API) | Endpoints |
+| DynamoDB | Base de datos NoSQL |
+| EventBridge | Eventos |
+| Step Functions | Orquestación |
+| Serverless Framework | Despliegue |
 
-GET /order/{id} evita conflicto con /orders/{customerId}
+---
 
-ScanIndexForward=True → ordena por SK (timestamp)
+## ⚠️ Notas Importantes
 
-✅ Estado Final
+- `status` es palabra reservada → usar `#st` en UpdateExpression  
+- `Decimal` → convertir a `float` solo para EventBridge  
+- `GET /order/{id}` → evita conflicto con `/orders/{customerId}`  
+- `ScanIndexForward=True` → ordena por SK (usa timestamp)
 
-💡 Listo para Producción
-Automático, escalable y totalmente serverless.
-Funciona como Taco Bell, pero con sabor a Pardos Chicken 🍗🔥
+---
+
+## 🏁 Estado Final
+✅ Flujo automático  
+✅ Sin errores  
+✅ 100% serverless  
+✅ Escalable y mantenible  
+
+**Autor:** Amir Ykehara  
+**Fecha:** 08 de noviembre de 2025  
+**Estado:** COMPLETADO 🚀
