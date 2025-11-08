@@ -6,7 +6,7 @@ provider:
   runtime: python3.13
   region: us-east-1
   memorySize: 256
-  timeout: 25  # menos que 30s para HTTP API
+  timeout: 30
   environment:
     CUSTOMERS_TABLE: CustomersTable
     ORDERS_TABLE: OrdersTable
@@ -23,9 +23,9 @@ provider:
             - dynamodb:Query
             - dynamodb:Scan
           Resource:
-            - arn:aws:dynamodb:#{AWS::Region}:#{AWS::AccountId}:table/CustomersTable
-            - arn:aws:dynamodb:#{AWS::Region}:#{AWS::AccountId}:table/OrdersTable
-            - arn:aws:dynamodb:#{AWS::Region}:#{AWS::AccountId}:table/StepsTable
+            - arn:aws:dynamodb:${self:provider.region}:*:table/CustomersTable
+            - arn:aws:dynamodb:${self:provider.region}:*:table/OrdersTable
+            - arn:aws:dynamodb:${self:provider.region}:*:table/StepsTable
         - Effect: Allow
           Action:
             - events:PutEvents
@@ -36,37 +36,33 @@ provider:
           Resource: "*"
 
 functions:
-  # ---------- Cliente MS existing endpoints ----------
+  # ---------- Cliente MS endpoints ----------
   createOrder:
     handler: handler.create_order
-    timeout: 25
     events:
       - httpApi:
           path: /orders
           method: post
   getOrdersByCustomer:
     handler: handler.get_orders_by_customer
-    timeout: 25
     events:
       - httpApi:
           path: /orders/{customerId}
           method: get
   createCustomer:
     handler: handler.create_customer
-    timeout: 25
     events:
       - httpApi:
           path: /customers
           method: post
   getCustomer:
     handler: handler.get_customer
-    timeout: 25
     events:
       - httpApi:
           path: /customers/{customerId}
           method: get
 
-  # ---------- Orchestrator Lambdas (Step Function tasks) ----------
+  # ---------- Orchestrator Lambdas ----------
   taskCooking:
     handler: orchestrator_handlers.task_cooking
     memorySize: 256
@@ -83,13 +79,13 @@ functions:
 resources:
   Resources:
 
-    # EventBus (custom)
+    # EventBus
     PardosEventBus:
       Type: AWS::Events::EventBus
       Properties:
         Name: pf-pardos-bus
 
-    # DynamoDB: CustomersTable
+    # DynamoDB Tables
     CustomersTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -102,7 +98,6 @@ resources:
             KeyType: HASH
         BillingMode: PAY_PER_REQUEST
 
-    # DynamoDB: OrdersTable
     OrdersTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -119,7 +114,6 @@ resources:
             KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
-    # DynamoDB: StepsTable
     StepsTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -136,7 +130,7 @@ resources:
             KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
-    # Role para EventBridge poder iniciar Step Function (target role)
+    # Role para EventBridge iniciar Step Function
     EventBridgeStepRole:
       Type: AWS::IAM::Role
       Properties:
@@ -160,7 +154,7 @@ resources:
                     - states:StartExecution
                   Resource: "*"
 
-    # Rol que usa Step Functions para ejecutar las Lambdas
+    # Step Function Role
     StepFunctionExecutionRole:
       Type: AWS::IAM::Role
       Properties:
@@ -192,14 +186,14 @@ resources:
                     - dynamodb:Query
                     - dynamodb:Scan
                   Resource:
-                    - arn:aws:dynamodb:#{AWS::Region}:#{AWS::AccountId}:table/OrdersTable
-                    - arn:aws:dynamodb:#{AWS::Region}:#{AWS::AccountId}:table/StepsTable
+                    - arn:aws:dynamodb:${self:provider.region}:*:table/OrdersTable
+                    - arn:aws:dynamodb:${self:provider.region}:*:table/StepsTable
                 - Effect: Allow
                   Action:
                     - events:PutEvents
                   Resource: "*"
 
-    # State Machine (Step Functions)
+    # State Machine
     PardosOrderStateMachine:
       Type: AWS::StepFunctions::StateMachine
       Properties:
@@ -213,21 +207,21 @@ resources:
               "States": {
                 "Cooking": {
                   "Type": "Task",
-                  "Resource": "${TaskCookingLambdaArn}",
+                  "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${TaskCookingLambda}",
                   "InputPath": "$",
                   "ResultPath": "$.cookingResult",
                   "Next": "Packaging"
                 },
                 "Packaging": {
                   "Type": "Task",
-                  "Resource": "${TaskPackagingLambdaArn}",
+                  "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${TaskPackagingLambda}",
                   "InputPath": "$",
                   "ResultPath": "$.packagingResult",
                   "Next": "Delivery"
                 },
                 "Delivery": {
                   "Type": "Task",
-                  "Resource": "${TaskDeliveryLambdaArn}",
+                  "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${TaskDeliveryLambda}",
                   "InputPath": "$",
                   "ResultPath": "$.deliveryResult",
                   "End": true
@@ -235,11 +229,11 @@ resources:
               }
             }
         DefinitionSubstitutions:
-          TaskCookingLambdaArn: !GetAtt TaskCooking.Arn
-          TaskPackagingLambdaArn: !GetAtt TaskPackaging.Arn
-          TaskDeliveryLambdaArn: !GetAtt TaskDelivery.Arn
+          TaskCookingLambda: ${self:service}-${opt:stage, self:provider.stage}-taskCooking
+          TaskPackagingLambda: ${self:service}-${opt:stage, self:provider.stage}-taskPackaging
+          TaskDeliveryLambda: ${self:service}-${opt:stage, self:provider.stage}-taskDelivery
 
-    # EventBridge Rule: cuando haya un OrderCreated -> start Step Function
+    # EventBridge Rule
     OrderCreatedRule:
       Type: AWS::Events::Rule
       Properties:
@@ -265,4 +259,5 @@ resources:
       Value: !Ref PardosEventBus
       Export:
         Name: PardosEventBusName
+
 
