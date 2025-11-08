@@ -148,8 +148,8 @@ resources:
           TaskPackagingLambdaArn: !GetAtt taskPackaging.Arn
           TaskDeliveryLambdaArn: !GetAtt taskDelivery.Arn
 
-plugins:
-  - serverless-python-requirements
+#plugins:
+  #- serverless-python-requirements
 
 custom:
   pythonRequirements:
