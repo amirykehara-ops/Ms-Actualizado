@@ -1,64 +1,74 @@
+org: amirykehara  #-> Your Serverless Framework Org
 service: cliente-ms
-#frameworkVersion: '3'
 
 provider:
   name: aws
-  runtime: python3.11
+  runtime: python3.13
   region: us-east-1
-  stage: ${opt:stage, 'dev'}
-  lambdaHashingVersion: 20201221
+  memorySize: 256
+  timeout: 15
+  iam:
+    role: arn:aws:iam::773506457076:role/LabRole  #-> Your IAM Role ARN (agrega permisos para EventBridge y StepFunctions si no los tiene)
   environment:
-    DYNAMODB_TABLE_CUSTOMER: ${self:service}-customer-${self:provider.stage}
-    DYNAMODB_TABLE_ORDER: ${self:service}-order-${self:provider.stage}
+    CUSTOMERS_TABLE: CustomersTable
+    ORDERS_TABLE: OrdersTable
+    STEPS_TABLE: StepsTable  # Nueva
+    EVENT_BUS_NAME: PardosEventBus  # Nuevo
 
 functions:
-  createCustomer:
-    handler: handler.create_customer
-    timeout: 30
-    events:
-      - httpApi:
-          path: /customer
-          method: post
-
-  getCustomer:
-    handler: handler.get_customer
-    timeout: 30
-    events:
-      - httpApi:
-          path: /customer/{id}
-          method: get
-
   createOrder:
     handler: handler.create_order
-    timeout: 30
     events:
       - httpApi:
-          path: /order
+          path: /orders
           method: post
-
   getOrdersByCustomer:
     handler: handler.get_orders_by_customer
-    timeout: 30
     events:
       - httpApi:
-          path: /order/customer/{id}
+          path: /orders/{customerId}
           method: get
-
-  # Lambdas usadas en Step Function
-  taskCooking:
-    handler: handler.task_cooking
-  taskPackaging:
-    handler: handler.task_packaging
-  taskDelivery:
-    handler: handler.task_delivery
+  createCustomer:
+    handler: handler.create_customer
+    events:
+      - httpApi:
+          path: /customers
+          method: post
+  getCustomer:
+    handler: handler.get_customer
+    events:
+      - httpApi:
+          path: /customers/{customerId}
+          method: get
+  # Nuevas funciones para Step Functions
+  processCooking:
+    handler: handler.process_cooking
+  processPackaging:
+    handler: handler.process_packaging
+  processDelivery:
+    handler: handler.process_delivery
+  processDelivered:
+    handler: handler.process_delivered
 
 resources:
   Resources:
-
-    CustomerTable:
+    # Tablas existentes
+    CustomersTable:
       Type: AWS::DynamoDB::Table
       Properties:
-        TableName: ${self:provider.environment.DYNAMODB_TABLE_CUSTOMER}
+        TableName: CustomersTable
+        AttributeDefinitions:
+          - AttributeName: PK
+            AttributeType: S
+        KeySchema:
+          - AttributeName: PK
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+
+    OrdersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: OrdersTable
         AttributeDefinitions:
           - AttributeName: PK
             AttributeType: S
@@ -71,10 +81,11 @@ resources:
             KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
-    OrderTable:
+    # Nueva tabla para steps
+    StepsTable:
       Type: AWS::DynamoDB::Table
       Properties:
-        TableName: ${self:provider.environment.DYNAMODB_TABLE_ORDER}
+        TableName: StepsTable
         AttributeDefinitions:
           - AttributeName: PK
             AttributeType: S
@@ -87,70 +98,75 @@ resources:
             KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
-    StepFunctionExecutionRole:
-      Type: AWS::IAM::Role
+    # Nuevo: EventBus (EventBridge)
+    PardosEventBus:
+      Type: AWS::Events::EventBus
       Properties:
-        RoleName: ${self:service}-stepfn-role-${self:provider.stage}
-        AssumeRolePolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Principal:
-                Service:
-                  - states.${self:provider.region}.amazonaws.com
-              Action:
-                - sts:AssumeRole
-        Policies:
-          - PolicyName: StepFunctionPolicy
-            PolicyDocument:
-              Version: '2012-10-17'
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - lambda:InvokeFunction
-                  Resource: "*"
+        Name: PardosEventBus
 
-    PardosOrderStateMachine:
+    # Nuevo: Rule para trigger Step Functions desde OrderCreated
+    OrderCreatedRule:
+      Type: AWS::Events::Rule
+      Properties:
+        EventBusName: !Ref PardosEventBus
+        EventPattern:
+          source: ["pardos.orders"]
+          detail-type: ["OrderCreated"]
+        State: ENABLED
+        Targets:
+          - Arn: !Ref OrderWorkflowStateMachine  # Apunta al State Machine
+            RoleArn: !GetAtt StepFunctionsExecutionRole.Arn  # Rol para ejecutar
+
+    # Nuevo: State Machine para Step Functions
+    OrderWorkflowStateMachine:
       Type: AWS::StepFunctions::StateMachine
       Properties:
-        StateMachineName: PardosOrderStateMachine-${self:provider.stage}
-        RoleArn: !GetAtt StepFunctionExecutionRole.Arn
+        StateMachineName: OrderWorkflow
         DefinitionString: !Sub |
           {
-            "Comment": "StateMachine for Pardos order workflow",
+            "Comment": "Workflow para procesar pedidos: CREATED -> COOKING -> PACKAGING -> DELIVERY -> DELIVERED",
             "StartAt": "Cooking",
             "States": {
               "Cooking": {
                 "Type": "Task",
-                "Resource": "${TaskCookingLambdaArn}",
-                "InputPath": "$",
-                "ResultPath": "$.cookingResult",
+                "Resource": "${aws_lambda_function.processCooking.arn}",
                 "Next": "Packaging"
               },
               "Packaging": {
                 "Type": "Task",
-                "Resource": "${TaskPackagingLambdaArn}",
-                "InputPath": "$",
-                "ResultPath": "$.packagingResult",
+                "Resource": "${aws_lambda_function.processPackaging.arn}",
                 "Next": "Delivery"
               },
               "Delivery": {
                 "Type": "Task",
-                "Resource": "${TaskDeliveryLambdaArn}",
-                "InputPath": "$",
-                "ResultPath": "$.deliveryResult",
+                "Resource": "${aws_lambda_function.processDelivery.arn}",
+                "Next": "Delivered"
+              },
+              "Delivered": {
+                "Type": "Task",
+                "Resource": "${aws_lambda_function.processDelivered.arn}",
                 "End": true
               }
             }
           }
-        DefinitionSubstitutions:
-          TaskCookingLambdaArn: !GetAtt taskCooking.Arn
-          TaskPackagingLambdaArn: !GetAtt taskPackaging.Arn
-          TaskDeliveryLambdaArn: !GetAtt taskDelivery.Arn
+        RoleArn: !GetAtt StepFunctionsExecutionRole.Arn
 
-#plugins:
-  #- serverless-python-requirements
+    # Rol para Step Functions (permisos para invocar Lambdas y acceder DynamoDB/EventBridge)
+    StepFunctionsExecutionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: states.amazonaws.com
+              Action: sts:AssumeRole
+        Path: "/"
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+          - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess  # Para acceso a tablas
+          - arn:aws:iam::aws:policy/AmazonEventBridgeFullAccess  # Para put_events
 
-custom:
-  pythonRequirements:
-    dockerizePip: true
+plugins:
+  - serverless-python-requirements  # Si necesitas paquetes extras, agrégalo
