@@ -118,6 +118,7 @@ resources:
             RoleArn: !GetAtt StepFunctionsExecutionRole.Arn  # Rol para ejecutar
 
     # Nuevo: State Machine para Step Functions
+    # Nuevo: State Machine para Step Functions
     OrderWorkflowStateMachine:
       Type: AWS::StepFunctions::StateMachine
       Properties:
@@ -129,28 +130,27 @@ resources:
             "States": {
               "Cooking": {
                 "Type": "Task",
-                "Resource": "${aws_lambda_function.processCooking.arn}",
+                "Resource": "${ProcessCookingLambdaFunction.Arn}",
                 "Next": "Packaging"
               },
               "Packaging": {
                 "Type": "Task",
-                "Resource": "${aws_lambda_function.processPackaging.arn}",
+                "Resource": "${ProcessPackagingLambdaFunction.Arn}",
                 "Next": "Delivery"
               },
               "Delivery": {
                 "Type": "Task",
-                "Resource": "${aws_lambda_function.processDelivery.arn}",
+                "Resource": "${ProcessDeliveryLambdaFunction.Arn}",
                 "Next": "Delivered"
               },
               "Delivered": {
                 "Type": "Task",
-                "Resource": "${aws_lambda_function.processDelivered.arn}",
+                "Resource": "${ProcessDeliveredLambdaFunction.Arn}",
                 "End": true
               }
             }
           }
         RoleArn: !GetAtt StepFunctionsExecutionRole.Arn
-
     # Rol para Step Functions (permisos para invocar Lambdas y acceder DynamoDB/EventBridge)
     StepFunctionsExecutionRole:
       Type: AWS::IAM::Role
